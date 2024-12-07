@@ -16,7 +16,7 @@
 #define UART_DEVICE_NODE DT_CHOSEN(zephyr_shell_uart)
 #define MSG_SIZE 9 /* fila para armazenar até 10 mensagens (alinhada ao limite de 4 bytes) */
 
-const struct device* stx = DEVICE_DT_GET(DT_NODELABEL(gpiob));
+const struct device* stx = DEVICE_DT_GET(DT_NODELABEL(gpiob)); 
 
 
 K_FIFO_DEFINE(fifo_dados);
@@ -75,8 +75,9 @@ void serial_cb(const struct device *dev, void *user_data) {
     }
 }
 
+/* Envia bit a bit da fifo */
 void bitabit(char *buf) {
-    gpio_pin_configure(stx, 0x12, GPIO_OUTPUT_ACTIVE);
+    gpio_pin_configure(stx, 0x12, GPIO_OUTPUT_ACTIVE); //define GPIO como output no pino 0x12 (PTB18)
     printk("-----Processando dados da FIFO-----\n");
     while ((envio = k_fifo_get(&fifo_dados, K_NO_WAIT)) != NULL) {
         printk("ID do pacote: %d\n", envio->id_tamanho);
@@ -90,13 +91,13 @@ void bitabit(char *buf) {
             
             printk("Enviando: ");
             for (int i = 0; i < 8; i++) {
-                if ((msg & 0b10000000) == 0b10000000) {
+                if ((msg & 0b10000000) == 0b10000000) { //shift dos bits
                     printk("1");
-                    gpio_pin_set(stx, 0x12, 1);
+                    gpio_pin_set(stx, 0x12, 1); // envia bit 1 pra GPIO
                     
                 } else {
                     printk("0");
-                    gpio_pin_set(stx, 0x12, 0);
+                    gpio_pin_set(stx, 0x12, 0); // envia bit 0 pra GPIO
                     
                 }
                 msg <<= 1;
