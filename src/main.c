@@ -28,7 +28,6 @@ struct lista_dados {
     char sync;
     uint8_t id_tamanho;
     char mensagem[8];
-    char etx;
 };
 static struct lista_dados pacote = {
         .sync = 0x16,
