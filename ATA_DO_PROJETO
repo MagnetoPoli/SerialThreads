@@ -1,0 +1,7 @@
+No dia 02/12/2024, passamos a manhã tentando adaptar o código que haviamos feito com o professor Bruno Sanches para transmitir e receber o sinal. 
+O código dito foi escrito para MBED e estamos adaptando para Zephyr. 
+Além disso, analisamos o exmeplo echo_bot do Zephyr para enviar uma mensagem via UART, no terminal serial.
+
+No dia 06/12/2024, implementamos de vez a thread que lê o que foi escrito e enviado no terminal serial UART e armazena os valores do Sync e da Mensagem em uma FiFo.
+Ademais, conseguimos entender o funcionamento da GPIO graças ao prof Bruno Albertini. Com isso, foi possível criar a função que envia os dados
+armazenados na FiFo bit por bit num GPIO como output, sendo crucial para transmitir os dados pelo emissor. Essa função deverá futuramente ser uma thread.
