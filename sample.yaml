@@ -1,12 +1,13 @@
 sample:
-  name: Button Sample
+  name: UART driver sample
 tests:
-  sample.basic.button:
-    tags:
-      - button
-      - gpio
-    filter: dt_enabled_alias_with_parent_compat("sw0", "gpio-keys")
+  sample.drivers.uart:
     integration_platforms:
-      - nrf52833dk/nrf52820
-    depends_on: gpio
-    harness: button
+      - qemu_x86
+    tags:
+      - serial
+      - uart
+    filter: CONFIG_SERIAL and
+            CONFIG_UART_INTERRUPT_DRIVEN and
+            dt_chosen_enabled("zephyr,shell-uart")
+    harness: keyboard
