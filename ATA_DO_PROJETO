@@ -4,4 +4,4 @@ Além disso, analisamos o exmeplo echo_bot do Zephyr para enviar uma mensagem vi
 
 No dia 06/12/2024, implementamos de vez a thread que lê o que foi escrito e enviado no terminal serial UART e armazena os valores do Sync e da Mensagem em uma FiFo.
 Ademais, conseguimos entender o funcionamento da GPIO graças ao prof Bruno Albertini. Com isso, foi possível criar a função que envia os dados
-armazenados na FiFo bit por bit num GPIO como output, sendo crucial para transmitir os dados pelo emissor. Essa função deverá futuramente ser uma thread
+armazenados na FiFo bit por bit num GPIO como output, sendo crucial para transmitir os dados pelo emissor. Essa função deverá futuramente ser uma thread...
