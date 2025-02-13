@@ -8,9 +8,20 @@
 #include <zephyr/sys/__assert.h>
 #include <inttypes.h>
 #include <string.h>
+#include <zephyr/random/random.h>
+
 
 #define MY_STACK_SIZE 1024
 #define MY_PRIORITY   7
+
+K_CONDVAR_DEFINE(condvar_tx);// CondVar para timer de escrita
+K_MUTEX_DEFINE(mutex_tx);
+
+K_CONDVAR_DEFINE(condvar_rx);// CondVar para timer de leitura
+K_MUTEX_DEFINE(mutex_rx);
+
+K_MUTEX_DEFINE(CSMA_mutex);
+
 
 #define UART_DEVICE_NODE DT_CHOSEN(zephyr_shell_uart)
 #define MSG_SIZE         100 /* fila para armazenar até 100 mensagens (alinhada ao limite de 4 bytes) */
@@ -18,12 +29,6 @@
 const struct device *stx = DEVICE_DT_GET(DT_NODELABEL(gpiob));
 
 K_FIFO_DEFINE(fifo_dados); // define a fifo para armazenar os pacotes
-K_CONDVAR_DEFINE(condvar_tx);
-K_MUTEX_DEFINE(mutex_tx);
-
-K_CONDVAR_DEFINE(condvar_rx);
-K_MUTEX_DEFINE(mutex_rx);
-
 
 struct lista_dados { // define o pacote
 	void *fifo_reserved;
@@ -44,7 +49,7 @@ static struct lista_dados pacote = {
 struct lista_dados *envio;
 
 /* fila para armazenar até 10 mensagens (alinhada ao limite de 4 bytes) */
-K_MSGQ_DEFINE(uart_msgq, MSG_SIZE, 10, 4);
+K_MSGQ_DEFINE(uart_msgq, MSG_SIZE, 30, 4);
 
 static const struct device *const uart_dev = DEVICE_DT_GET(UART_DEVICE_NODE);
 
@@ -118,9 +123,23 @@ void serial_cb(const struct device *dev, void *user_data)
 void bitabit()
 {
 	// printk("-----Processando dados da FIFO-----\n");
-
+	int conflitos = 10;
+	int espera = 1;
+	int multiplos = 1;
 	while ((envio = k_fifo_get(&fifo_dados, K_NO_WAIT)) != NULL) {
+		while(k_mutex_lock(&CSMA_mutex, K_NO_WAIT) != 0){ // se houver conflitos, espera um tempo aleatorio para transmitir
+            conflitos++;
+            for(int h=0; h <= conflitos; h++){
+				uint32_t random_number = sys_rand32_get();
+                espera = espera + (multiplos*random_number);
+				multiplos++;
+            }
+            k_msleep(espera);
+        }
+		espera = 0;
+		
 
+        k_condvar_wait(&condvar_tx, &mutex_tx, K_FOREVER);
 		for (int i = 0; i < 8; i++) {
 			if ((envio->stx & 0b10000000) ==
 			    0b10000000) { // verifica com a mascara se é 1  ou 0 no bit mais
@@ -133,7 +152,6 @@ void bitabit()
 			envio->stx <<= 1; // desloca para o próximo bit
 		}
 		// printk("Enviei o STX\n");
-
 		for (int i = 0; i < 8; i++) {
 			if ((envio->id & 0b10000000) ==
 			    0b10000000) { // verifica com a mascara se é 1  ou 0 no bit mais
@@ -154,8 +172,8 @@ void bitabit()
 			} else {
 				gpio_pin_set(stx, 0x1, 0); // envia bit 0 para GPIO
 			}
-			k_condvar_wait(&condvar_tx, &mutex_tx, K_FOREVER);
 			envio->id_tamanho <<= 1; // desloca para o próximo bit
+			k_condvar_wait(&condvar_tx, &mutex_tx, K_FOREVER);
 		}
 		// printk("Enviei o Id Tamanho\n");
 
@@ -173,10 +191,22 @@ void bitabit()
 				} else {
 					gpio_pin_set(stx, 0x1, 0); // envia bit 0 para GPIO
 				}
-				k_condvar_wait(&condvar_tx, &mutex_tx, K_FOREVER);
 				msg <<= 1; // desloca para o próximo bit
+				k_condvar_wait(&condvar_tx, &mutex_tx, K_FOREVER);
 			}
 		}
+		for (int i = 0; i < 8; i++) {
+			if ((envio->etx & 0b10000000) ==
+			    0b10000000) { // verifica com a mascara se é 1  ou 0 no bit mais
+					  // significativo
+				gpio_pin_set(stx, 0x1, 1); // envia bit 1 para GPIO
+			} else {
+				gpio_pin_set(stx, 0x1, 0); // envia bit 0 para GPIO
+			}
+			k_condvar_wait(&condvar_tx, &mutex_tx, K_FOREVER);
+			envio->etx <<= 1; // desloca para o próximo bit
+		}
+        k_condvar_wait(&condvar_tx, &mutex_tx, K_FOREVER);
 	}
 
 	// printk("--------------\n\n");
@@ -190,6 +220,7 @@ void timer_TX(struct k_timer *dummy){
 // armazena a mensagem lida no terminal em uma fifo
 void armazenar(char *buf)
 {
+
 	int msg_len = strlen(buf);     // verifica o tamanho da mensagem lida no terminal
 	int j = 0;                     // variavel que soma ate o tamanho da mensagem
 	int n_mensagens = msg_len / 8; // faz o quociente da divisao por 8 para decobrir quantas
@@ -280,22 +311,22 @@ void rx(void)
 	while (1) {
 		value = gpio_pin_get(stx, 0x0);
 		// Extrai os bits centrais e verifica
-		status = validar_32_bits_para_8_bits(
-			buffer_teste,
-			&resultado); // 32 bits válido ou não, se sim, retorna o valor para 8 bit
+		status = validar_32_bits_para_8_bits(buffer_teste,&resultado); // 32 bits válido ou não, se sim, retorna o valor para 8 bit
 		if (status == 0 && resultado != 0) {
 
 			// printf("achei: %d\n", (resultado));
 
 			if (resultado == 0x2) { // resultado == STX
+				k_mutex_lock(&CSMA_mutex, K_NO_WAIT);
 				buffer_teste <<= 1;
 				buffer_teste = (buffer_teste | value);
-				// printf("achei STX %c\n", (resultado));
+				 //printf("achei STX %c\n", (resultado));
 				for (int i = 0; i < 32; i++) {
 					value = gpio_pin_get(stx, 0x0);
 					buffer_teste <<= 1;
 					buffer_teste = (buffer_teste | value);
 					k_condvar_wait(&condvar_rx, &mutex_rx, K_FOREVER);
+
 				}
 				status = validar_32_bits_para_8_bits(
 					buffer_teste, &resultado); // 32 bits válido ou não, se sim,
@@ -307,6 +338,7 @@ void rx(void)
 					buffer_teste <<= 1;
 					buffer_teste = (buffer_teste | value);
 					k_condvar_wait(&condvar_rx, &mutex_rx, K_FOREVER);
+
 				}
 				status = validar_32_bits_para_8_bits(
 					buffer_teste, &resultado); // 32 bits válido ou não, se sim,
@@ -320,6 +352,7 @@ void rx(void)
 						buffer_teste <<= 1;
 						buffer_teste = (buffer_teste | value);
 						k_condvar_wait(&condvar_rx, &mutex_rx, K_FOREVER);
+
 					}
 					status = validar_32_bits_para_8_bits(
 						buffer_teste,
@@ -329,6 +362,16 @@ void rx(void)
 					printf("%c", mensagem_lida);
 				}
 				// printf("\n");
+				for (int i = 0; i < 32; i++) {
+					value = gpio_pin_get(stx, 0x0);
+					buffer_teste <<= 1;
+					buffer_teste = (buffer_teste | value);
+					k_condvar_wait(&condvar_rx, &mutex_rx, K_FOREVER);
+
+				}
+				status = validar_32_bits_para_8_bits(
+					buffer_teste, &resultado); // 32 bits válido ou não, se sim,
+								   // retorna o valor para 8 bit
 			}
 		}
 		buffer_teste <<= 1;
@@ -338,21 +381,19 @@ void rx(void)
 }
 
 void timer_RX(struct k_timer *dummy){
-
 	k_condvar_signal(&condvar_rx); // dá sinal para alterar o valor de tx
 }
 
-
 K_TIMER_DEFINE(TX_timer, timer_TX, NULL);
 K_TIMER_DEFINE(RX_timer, timer_RX, NULL);
+
 
 /* Primeira thread le o que voce digita no teclado ate 7 bits (id) monta o pacote e trasnmite para a
  * FIFO */
 K_THREAD_DEFINE(pega_dados_id, MY_STACK_SIZE, pega_dados, NULL, NULL, NULL, MY_PRIORITY, 0, 0);
 K_THREAD_DEFINE(rx_id, MY_STACK_SIZE, rx, NULL, NULL, NULL, MY_PRIORITY, 0, 0);
-
 int main()
 {
-    k_timer_start(&TX_timer, K_MSEC(0),K_MSEC(40)); // começa o timer para chamar a callback a cada 10ms (100bps)
-    k_timer_start(&RX_timer, K_MSEC(0),K_MSEC(10)); // começa o timer para chamar a callback a cada 10ms (100bps)
+	k_timer_start(&TX_timer, K_MSEC(40),K_MSEC(4)); // começa o timer para chamar a callback a cada 4ms (250bps)
+    k_timer_start(&RX_timer, K_MSEC(10),K_MSEC(1)); // começa o timer para chamar a callback a cada 1ms (1000bps)
 }
